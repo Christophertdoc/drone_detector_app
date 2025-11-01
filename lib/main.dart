@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:camera/camera.dart';
 import 'detector_service.dart';
 import 'models.dart';
@@ -83,6 +84,7 @@ class _MyHomePageState extends State<MyHomePage> {
   late Future<void> _initializeControllerFuture;
   bool isDetecting = false;
   List<Detection>? _detections;
+  CameraImage? _latestImage;
 
   @override
   void initState() {
@@ -107,6 +109,8 @@ class _MyHomePageState extends State<MyHomePage> {
 
   void _startImageStream() {
     _controller.startImageStream((CameraImage image) {
+      // keep latest image for debug inference
+      _latestImage = image;
       if (!isDetecting) {
         isDetecting = true;
         _detectDrones(image).then((_) {
@@ -160,6 +164,42 @@ class _MyHomePageState extends State<MyHomePage> {
           }
         },
       ),
+      floatingActionButton: kDebugMode
+          ? Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                FloatingActionButton(
+                  heroTag: 'enable_tflite',
+                  onPressed: () async {
+                    final msg = await DroneDetector.enableTflite();
+                    if (!mounted) return;
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text(msg)),
+                    );
+                  },
+                  child: const Icon(Icons.bug_report),
+                  tooltip: 'Enable tflite (debug)',
+                ),
+                const SizedBox(height: 8),
+                FloatingActionButton(
+                  heroTag: 'run_inference',
+                  onPressed: () async {
+                    if (_latestImage == null) {
+                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No camera frame available yet')));
+                      return;
+                    }
+                    final msg = await DroneDetector.testInference(_latestImage!);
+                    if (!mounted) return;
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text(msg)),
+                    );
+                  },
+                  child: const Icon(Icons.play_arrow),
+                  tooltip: 'Run single inference (debug)',
+                ),
+              ],
+            )
+          : null,
     );
   }
 }

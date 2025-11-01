@@ -37,7 +37,9 @@ dependencies:
   
   # Camera access
   camera: ^0.10.5+5
-  
+  # TensorFlow Lite
+  tflite_flutter: ^0.12.1
+
   # Image processing
   image: ^4.1.3
   path_provider: ^2.0.15
