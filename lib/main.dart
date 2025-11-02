@@ -198,7 +198,9 @@ class _MyHomePageState extends State<MyHomePage> {
                     final inputShape = DroneDetector.inputShape;
                     final outputShape = DroneDetector.outputShape;
 
-                    final msg = await DroneDetector.testInference(_latestImage!);
+                    final msg = await DroneDetector.testInference(
+                      _latestImage!,
+                    );
                     if (!mounted) return;
 
                     // Show debug output in scrollable dialog
@@ -224,7 +226,8 @@ class _MyHomePageState extends State<MyHomePage> {
                               ),
                               const SizedBox(height: 16),
                               Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
                                 children: [
                                   TextButton(
                                     onPressed: () {
