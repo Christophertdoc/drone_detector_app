@@ -95,6 +95,24 @@ class DroneDetector {
   static bool _tfliteEnabled = false;
   static final StringBuffer _debugLog = StringBuffer();
 
+  /// Public: get model input shape, or null if not loaded
+  static List<int>? get inputShape {
+    try {
+      return _interpreter?.getInputTensor(0).shape;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Public: get model output shape, or null if not loaded
+  static List<int>? get outputShape {
+    try {
+      return _interpreter?.getOutputTensor(0).shape;
+    } catch (_) {
+      return null;
+    }
+  }
+
   // Model / tensor shapes (adjust if your model differs)
   static const int inputSize = 640;
   static const int numChannels = 3;
