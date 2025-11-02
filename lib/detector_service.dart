@@ -8,6 +8,82 @@ import 'package:tflite_flutter/tflite_flutter.dart';
 
 import 'models.dart';
 
+// Top-level isolate-safe preprocess function. It receives a Map with
+// camera frame metadata and plane bytes, and returns a Float32List
+// normalized [R,G,B,...] buffer sized for `inputSize` x `inputSize`.
+// This allows expensive pixel conversions to run off the UI isolate.
+Future<Float32List> _preprocessToFloat32Isolate(Map<String, dynamic> req) async {
+  final int width = req['width'] as int;
+  final int height = req['height'] as int;
+  final int inputSizeLocal = req['inputSize'] as int;
+  final int numChannelsLocal = req['numChannels'] as int;
+  final bool isBGRA = req['isBGRA'] as bool;
+
+  final List planes = req['planes'] as List;
+
+  final buffer = Float32List(1 * numChannelsLocal * inputSizeLocal * inputSizeLocal);
+
+  if (isBGRA) {
+    final Uint8List planeBytes = planes[0]['bytes'] as Uint8List;
+    final int rowStride = planes[0]['bytesPerRow'] as int;
+
+    for (var y = 0; y < inputSizeLocal; y++) {
+      final srcY = (y * height / inputSizeLocal).floor().clamp(0, height - 1);
+      for (var x = 0; x < inputSizeLocal; x++) {
+        final srcX = (x * width / inputSizeLocal).floor().clamp(0, width - 1);
+        final srcIndex = srcY * rowStride + srcX * 4;
+
+        int b = 0, g = 0, r = 0;
+        if (srcIndex + 2 < planeBytes.length) {
+          b = planeBytes[srcIndex];
+          g = planeBytes[srcIndex + 1];
+          r = planeBytes[srcIndex + 2];
+        }
+
+        final base = (y * inputSizeLocal + x) * 3;
+        buffer[base] = r / 255.0;
+        buffer[base + 1] = g / 255.0;
+        buffer[base + 2] = b / 255.0;
+      }
+    }
+  } else {
+    final Uint8List yPlane = planes[0]['bytes'] as Uint8List;
+    final Uint8List uPlane = planes.length > 1 ? planes[1]['bytes'] as Uint8List : Uint8List(0);
+    final Uint8List vPlane = planes.length > 2 ? planes[2]['bytes'] as Uint8List : Uint8List(0);
+    final int uvRowStride = planes.length > 1 ? planes[1]['bytesPerRow'] as int : 0;
+    final int uvPixelStride = planes.length > 1 && planes[1]['bytesPerPixel'] != null ? planes[1]['bytesPerPixel'] as int : 1;
+
+    for (var y = 0; y < inputSizeLocal; y++) {
+      final srcY = (y * height / inputSizeLocal).floor().clamp(0, height - 1);
+      for (var x = 0; x < inputSizeLocal; x++) {
+        final srcX = (x * width / inputSizeLocal).floor().clamp(0, width - 1);
+
+        final int yIndex = srcY * width + srcX;
+        final yp = (yIndex < yPlane.length) ? yPlane[yIndex] : 0;
+
+        final int uvX = (srcX / 2).floor();
+        final int uvY = (srcY / 2).floor();
+        final int uvIndex = uvX * uvPixelStride + uvY * uvRowStride;
+
+        final up = (uvIndex < uPlane.length) ? uPlane[uvIndex] : 128;
+        final vp = (uvIndex < vPlane.length) ? vPlane[uvIndex] : 128;
+
+        // Convert YUV to RGB
+        var r = (yp + 1.402 * (vp - 128)).round().clamp(0, 255);
+        var g = (yp - 0.344136 * (up - 128) - 0.714136 * (vp - 128)).round().clamp(0, 255);
+        var b = (yp + 1.772 * (up - 128)).round().clamp(0, 255);
+
+        final base = (y * inputSizeLocal + x) * 3;
+        buffer[base] = r / 255.0;
+        buffer[base + 1] = g / 255.0;
+        buffer[base + 2] = b / 255.0;
+      }
+    }
+  }
+
+  return buffer;
+}
+
 // (No top-level InferenceData anymore — we keep inference synchronous for now.)
 
 /// DroneDetector with optional TensorFlow Lite support.
@@ -103,8 +179,26 @@ class DroneDetector {
     try {
       _addToLog('Starting inference...');
 
-      // Preprocess image -> Float32List
-      final input = _preprocessToFloat32(image);
+      // Preprocess image -> Float32List (offloaded to an isolate)
+      final bool isBGRA = image.format.group == ImageFormatGroup.bgra8888 ||
+          (image.planes.length == 1 && image.planes[0].bytesPerPixel == 4);
+
+      final planesForIsolate = image.planes.map((p) => {
+            'bytes': p.bytes,
+            'bytesPerRow': p.bytesPerRow,
+            'bytesPerPixel': p.bytesPerPixel,
+          }).toList();
+
+      final req = {
+        'width': image.width,
+        'height': image.height,
+        'inputSize': inputSize,
+        'numChannels': numChannels,
+        'isBGRA': isBGRA,
+        'planes': planesForIsolate,
+      };
+
+      final input = await compute(_preprocessToFloat32Isolate, req);
 
       // Determine interpreter input/output shapes
       List<int> inShape;
@@ -160,6 +254,9 @@ class DroneDetector {
 
   /// Convert CameraImage (YUV420) to a normalized Float32List matching
   /// model input. Returns a Float32List in (flattened) [R,G,B,...] order.
+  // Keep synchronous fallback implementation; used for tests or platforms
+  // where compute isn't available. Silence unused-element lints.
+  // ignore: unused_element
   static Float32List _preprocessToFloat32(CameraImage image) {
     // We'll produce a channels-last flattened buffer [R,G,B,R,G,B,...]
     // mapped to the model's expected memory layout via reshape later.
