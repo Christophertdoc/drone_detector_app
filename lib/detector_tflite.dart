@@ -8,9 +8,14 @@ import 'package:tflite_flutter/tflite_flutter.dart';
 class TfliteTest {
   /// Attempts to load the model from assets and close the interpreter.
   /// Returns a short message describing success or the caught error.
-  static Future<String> loadAndClose({String assetPath = 'models/drone-detection-yolov11_float16.tflite'}) async {
+  static Future<String> loadAndClose({
+    String assetPath = 'models/drone-detection-yolov11_float16.tflite',
+  }) async {
     try {
-      final interpreter = await Interpreter.fromAsset(assetPath, options: InterpreterOptions()..threads = 2);
+      final interpreter = await Interpreter.fromAsset(
+        assetPath,
+        options: InterpreterOptions()..threads = 2,
+      );
       final address = interpreter.address;
       interpreter.close();
       return 'Interpreter loaded and closed successfully (address=$address)';

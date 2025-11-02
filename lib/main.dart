@@ -174,9 +174,9 @@ class _MyHomePageState extends State<MyHomePage> {
                   onPressed: () async {
                     final msg = await DroneDetector.enableTflite();
                     if (!mounted) return;
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text(msg)),
-                    );
+                    ScaffoldMessenger.of(
+                      context,
+                    ).showSnackBar(SnackBar(content: Text(msg)));
                   },
                   child: const Icon(Icons.bug_report),
                   tooltip: 'Enable tflite (debug)',
@@ -187,10 +187,15 @@ class _MyHomePageState extends State<MyHomePage> {
                   onPressed: () async {
                     if (_latestImage == null) {
                       ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('No camera frame available yet')));
+                        const SnackBar(
+                          content: Text('No camera frame available yet'),
+                        ),
+                      );
                       return;
                     }
-                    final msg = await DroneDetector.testInference(_latestImage!);
+                    final msg = await DroneDetector.testInference(
+                      _latestImage!,
+                    );
                     if (!mounted) return;
 
                     // Show debug output in scrollable dialog
@@ -210,14 +215,22 @@ class _MyHomePageState extends State<MyHomePage> {
                               ),
                               const SizedBox(height: 16),
                               Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
                                 children: [
                                   TextButton(
                                     onPressed: () {
                                       final data = ClipboardData(text: msg);
                                       Clipboard.setData(data);
-                                      ScaffoldMessenger.of(context).showSnackBar(
-                                        const SnackBar(content: Text('Debug output copied to clipboard')));
+                                      ScaffoldMessenger.of(
+                                        context,
+                                      ).showSnackBar(
+                                        const SnackBar(
+                                          content: Text(
+                                            'Debug output copied to clipboard',
+                                          ),
+                                        ),
+                                      );
                                     },
                                     child: const Text('Copy'),
                                   ),
@@ -226,8 +239,15 @@ class _MyHomePageState extends State<MyHomePage> {
                                       final log = DroneDetector.getDebugLog();
                                       final data = ClipboardData(text: log);
                                       Clipboard.setData(data);
-                                      ScaffoldMessenger.of(context).showSnackBar(
-                                        const SnackBar(content: Text('Full debug log copied to clipboard')));
+                                      ScaffoldMessenger.of(
+                                        context,
+                                      ).showSnackBar(
+                                        const SnackBar(
+                                          content: Text(
+                                            'Full debug log copied to clipboard',
+                                          ),
+                                        ),
+                                      );
                                     },
                                     child: const Text('Copy Full Log'),
                                   ),

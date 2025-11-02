@@ -1,11 +1,14 @@
 import 'dart:typed_data';
 
 import 'package:camera/camera.dart';
+import 'package:flutter/foundation.dart';
 // Note: we avoid using the `image` package here for preprocessing to keep
 // conversion and resizing explicit and robust across package API changes.
 import 'package:tflite_flutter/tflite_flutter.dart';
 
 import 'models.dart';
+
+// (No top-level InferenceData anymore — we keep inference synchronous for now.)
 
 /// DroneDetector with optional TensorFlow Lite support.
 ///
@@ -28,16 +31,54 @@ class DroneDetector {
     print('DroneDetector initialized (non-ML)');
   }
 
+  /// Build input tensor in NCHW format (batch, channels, height, width)
+  static Object _buildNCHWInput(Float32List input) {
+    return List.generate(batchSize, (_) {
+      return List.generate(numChannels, (c) {
+        return List.generate(inputSize, (y) {
+          return List.generate(inputSize, (x) {
+            final base = (y * inputSize + x) * 3;
+            switch (c) {
+              case 0:
+                return input[base];
+              case 1:
+                return input[base + 1];
+              default:
+                return input[base + 2];
+            }
+          });
+        });
+      });
+    });
+  }
+
+  /// Build input tensor in NHWC format (batch, height, width, channels)
+  static Object _buildNHWCInput(Float32List input) {
+    return List.generate(batchSize, (_) {
+      return List.generate(inputSize, (y) {
+        return List.generate(inputSize, (x) {
+          final base = (y * inputSize + x) * 3;
+          return [input[base], input[base + 1], input[base + 2]];
+        });
+      });
+    });
+  }
+
   /// Enable and load TensorFlow Lite interpreter. Returns a short status
   /// message describing success or the error encountered.
-  static Future<String> enableTflite({String modelAsset = 'models/drone-detection-yolov11_float16.tflite'}) async {
+  static Future<String> enableTflite({
+    String modelAsset = 'models/drone-detection-yolov11_float16.tflite',
+  }) async {
     if (_interpreter != null) {
       _addToLog('Interpreter already loaded');
       return 'Interpreter already loaded';
     }
     try {
       _addToLog('Loading interpreter from $modelAsset...');
-      _interpreter = await Interpreter.fromAsset(modelAsset, options: InterpreterOptions()..threads = 2);
+      _interpreter = await Interpreter.fromAsset(
+        modelAsset,
+        options: InterpreterOptions()..threads = 2,
+      );
       _tfliteEnabled = true;
       _addToLog('Interpreter loaded successfully');
       return 'Interpreter loaded successfully';
@@ -47,6 +88,8 @@ class DroneDetector {
       return error;
     }
   }
+
+  // (Synchronous inference path is used by `testInference` below.)
 
   /// Run a single inference on the provided [image] and return a short
   /// raw-tensor dump string. This is a debug helper to show the interpreter
@@ -59,62 +102,32 @@ class DroneDetector {
 
     try {
       _addToLog('Starting inference...');
+
       // Preprocess image -> Float32List
       final input = _preprocessToFloat32(image);
 
-      // Inspect the interpreter's expected input and output shapes so we can
-      // feed tensors in the correct memory layout (NHWC vs NCHW etc.). This
-      // prevents channel/shape mismatch errors like the conv.cc failure.
+      // Determine interpreter input/output shapes
       List<int> inShape;
+      List<int> outShape;
       try {
-        final inTensor = _interpreter!.getInputTensor(0);
-        inShape = inTensor.shape;
+        inShape = _interpreter!.getInputTensor(0).shape;
       } catch (e) {
-        // Fallback: common NHWC layout [1, H, W, C]
         inShape = [batchSize, inputSize, inputSize, numChannels];
+      }
+      try {
+        outShape = _interpreter!.getOutputTensor(0).shape;
+      } catch (e) {
+        outShape = [batchSize, outputBoxes, outputElements];
       }
 
       // Build input nested list matching the interpreter's input shape.
       Object inputForInterpreter;
       if (inShape.length == 4 && inShape[1] == numChannels) {
-        // Detected something like [1, C, H, W] (NCHW)
-        inputForInterpreter = List.generate(batchSize, (_) {
-          return List.generate(numChannels, (c) {
-            return List.generate(inputSize, (y) {
-              return List.generate(inputSize, (x) {
-                final base = (y * inputSize + x) * 3;
-                switch (c) {
-                  case 0:
-                    return input[base];
-                  case 1:
-                    return input[base + 1];
-                  default:
-                    return input[base + 2];
-                }
-              });
-            });
-          });
-        });
+        // NCHW
+        inputForInterpreter = _buildNCHWInput(input);
       } else {
-        // Default to NHWC [1, H, W, C]
-        inputForInterpreter = List.generate(batchSize, (_) {
-          return List.generate(inputSize, (y) {
-            return List.generate(inputSize, (x) {
-              final base = (y * inputSize + x) * 3;
-              return [input[base], input[base + 1], input[base + 2]];
-            });
-          });
-        });
-      }
-
-      // Prepare an output buffer that matches the interpreter's output shape.
-      List<int> outShape;
-      try {
-        final outTensor = _interpreter!.getOutputTensor(0);
-        outShape = outTensor.shape;
-      } catch (e) {
-        // Fallback conservative shape used previously: [1, outputBoxes, outputElements]
-        outShape = [batchSize, outputBoxes, outputElements];
+        // NHWC
+        inputForInterpreter = _buildNHWCInput(input);
       }
 
       Object outputForInterpreter = _makeNestedListFromShape(outShape);
@@ -158,7 +171,8 @@ class DroneDetector {
     // may deliver BGRA8888 instead of YUV420. Handle both safely.
     final formatGroup = image.format.group;
 
-    if (formatGroup == ImageFormatGroup.bgra8888 || (image.planes.length == 1 && image.planes[0].bytesPerPixel == 4)) {
+    if (formatGroup == ImageFormatGroup.bgra8888 ||
+        (image.planes.length == 1 && image.planes[0].bytesPerPixel == 4)) {
       // BGRA path: plane[0].bytes contains BGRA bytes per pixel
       final plane = image.planes[0].bytes;
       final rowStride = image.planes[0].bytesPerRow;
@@ -186,10 +200,19 @@ class DroneDetector {
       // YUV420 path (default for many Android devices). Safely handle
       // cases where U/V plane strides or lengths may be unexpected.
       final yPlane = image.planes[0].bytes;
-      final uPlane = image.planes.length > 1 ? image.planes[1].bytes : Uint8List(0);
-      final vPlane = image.planes.length > 2 ? image.planes[2].bytes : Uint8List(0);
-      final uvRowStride = image.planes.length > 1 ? image.planes[1].bytesPerRow : 0;
-      final uvPixelStride = image.planes.length > 1 && image.planes[1].bytesPerPixel != null ? image.planes[1].bytesPerPixel! : 1;
+      final uPlane = image.planes.length > 1
+          ? image.planes[1].bytes
+          : Uint8List(0);
+      final vPlane = image.planes.length > 2
+          ? image.planes[2].bytes
+          : Uint8List(0);
+      final uvRowStride = image.planes.length > 1
+          ? image.planes[1].bytesPerRow
+          : 0;
+      final uvPixelStride =
+          image.planes.length > 1 && image.planes[1].bytesPerPixel != null
+          ? image.planes[1].bytesPerPixel!
+          : 1;
 
       for (var y = 0; y < inputSize; y++) {
         final srcY = (y * height / inputSize).floor().clamp(0, height - 1);
@@ -208,7 +231,9 @@ class DroneDetector {
 
           // Convert YUV to RGB
           var r = (yp + 1.402 * (vp - 128)).round().clamp(0, 255);
-          var g = (yp - 0.344136 * (up - 128) - 0.714136 * (vp - 128)).round().clamp(0, 255);
+          var g = (yp - 0.344136 * (up - 128) - 0.714136 * (vp - 128))
+              .round()
+              .clamp(0, 255);
           var b = (yp + 1.772 * (up - 128)).round().clamp(0, 255);
 
           final base = (y * inputSize + x) * 3;
