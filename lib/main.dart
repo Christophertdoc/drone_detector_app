@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:camera/camera.dart';
 import 'detector_service.dart';
 import 'models.dart';
@@ -185,13 +186,63 @@ class _MyHomePageState extends State<MyHomePage> {
                   heroTag: 'run_inference',
                   onPressed: () async {
                     if (_latestImage == null) {
-                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No camera frame available yet')));
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('No camera frame available yet')));
                       return;
                     }
                     final msg = await DroneDetector.testInference(_latestImage!);
                     if (!mounted) return;
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text(msg)),
+
+                    // Show debug output in scrollable dialog
+                    showDialog(
+                      context: context,
+                      builder: (context) => AlertDialog(
+                        title: const Text('Inference Debug Output'),
+                        content: SizedBox(
+                          width: double.maxFinite,
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Flexible(
+                                child: SingleChildScrollView(
+                                  child: SelectableText(msg),
+                                ),
+                              ),
+                              const SizedBox(height: 16),
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  TextButton(
+                                    onPressed: () {
+                                      final data = ClipboardData(text: msg);
+                                      Clipboard.setData(data);
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        const SnackBar(content: Text('Debug output copied to clipboard')));
+                                    },
+                                    child: const Text('Copy'),
+                                  ),
+                                  TextButton(
+                                    onPressed: () {
+                                      final log = DroneDetector.getDebugLog();
+                                      final data = ClipboardData(text: log);
+                                      Clipboard.setData(data);
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        const SnackBar(content: Text('Full debug log copied to clipboard')));
+                                    },
+                                    child: const Text('Copy Full Log'),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.pop(context),
+                            child: const Text('Close'),
+                          ),
+                        ],
+                      ),
                     );
                   },
                   child: const Icon(Icons.play_arrow),

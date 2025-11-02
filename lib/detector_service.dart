@@ -14,6 +14,7 @@ import 'models.dart';
 class DroneDetector {
   static Interpreter? _interpreter;
   static bool _tfliteEnabled = false;
+  static final StringBuffer _debugLog = StringBuffer();
 
   // Model / tensor shapes (adjust if your model differs)
   static const int inputSize = 640;
@@ -30,13 +31,20 @@ class DroneDetector {
   /// Enable and load TensorFlow Lite interpreter. Returns a short status
   /// message describing success or the error encountered.
   static Future<String> enableTflite({String modelAsset = 'models/drone-detection-yolov11_float16.tflite'}) async {
-    if (_interpreter != null) return 'Interpreter already loaded';
+    if (_interpreter != null) {
+      _addToLog('Interpreter already loaded');
+      return 'Interpreter already loaded';
+    }
     try {
+      _addToLog('Loading interpreter from $modelAsset...');
       _interpreter = await Interpreter.fromAsset(modelAsset, options: InterpreterOptions()..threads = 2);
       _tfliteEnabled = true;
+      _addToLog('Interpreter loaded successfully');
       return 'Interpreter loaded successfully';
     } catch (e, st) {
-      return 'Failed to load interpreter: $e\n$st';
+      final error = 'Failed to load interpreter: $e\n$st';
+      _addToLog(error);
+      return error;
     }
   }
 
@@ -44,9 +52,13 @@ class DroneDetector {
   /// raw-tensor dump string. This is a debug helper to show the interpreter
   /// output quickly without implementing the full detection pipeline.
   static Future<String> testInference(CameraImage image) async {
-    if (!_tfliteEnabled || _interpreter == null) return 'TFLite not enabled';
+    if (!_tfliteEnabled || _interpreter == null) {
+      _addToLog('TFLite not enabled');
+      return 'TFLite not enabled';
+    }
 
     try {
+      _addToLog('Starting inference...');
       // Preprocess image -> Float32List
       final input = _preprocessToFloat32(image);
 
@@ -114,9 +126,13 @@ class DroneDetector {
       final flat = <double>[];
       _flattenNested(outputForInterpreter, flat);
       final firstN = flat.length < 100 ? flat : flat.sublist(0, 100);
-      return 'output_len=${flat.length}; sample=${firstN.join(', ')}';
+      final output = 'output_len=${flat.length}; sample=${firstN.join(', ')}';
+      _addToLog('Inference complete: $output');
+      return output;
     } catch (e, st) {
-      return 'Inference failed: $e\n$st';
+      final error = 'Inference failed: $e\n$st';
+      _addToLog(error);
+      return error;
     }
   }
 
@@ -235,9 +251,21 @@ class DroneDetector {
   }
 
   /// Dispose interpreter when done.
+  /// Get the full debug log as a string
+  static String getDebugLog() {
+    return _debugLog.toString();
+  }
+
+  /// Add a message to the debug log with timestamp
+  static void _addToLog(String message) {
+    final timestamp = DateTime.now();
+    _debugLog.writeln('[$timestamp] $message');
+  }
+
   static void dispose() {
     _interpreter?.close();
     _interpreter = null;
     _tfliteEnabled = false;
+    _debugLog.clear();
   }
 }
