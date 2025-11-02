@@ -281,13 +281,121 @@ class DroneDetector {
     }
   }
 
+  /// Run inference and return the raw output tensor in shape (1, 5, 8400)
+  static Future<List<List<List<double>>>?> runInference(
+    CameraImage image,
+  ) async {
+    try {
+      if (!_tfliteEnabled || _interpreter == null) {
+        _addToLog('TFLite not enabled');
+        return null;
+      }
+
+      _addToLog('Starting inference...');
+
+      // Preprocess image in isolate
+      final req = {
+        'width': image.width,
+        'height': image.height,
+        'inputSize': inputSize,
+        'numChannels': numChannels,
+        'isBGRA':
+            image.format.group == ImageFormatGroup.bgra8888 ||
+            (image.planes.length == 1 && image.planes[0].bytesPerPixel == 4),
+        'planes': image.planes
+            .map(
+              (p) => {
+                'bytes': p.bytes,
+                'bytesPerRow': p.bytesPerRow,
+                'bytesPerPixel': p.bytesPerPixel,
+              },
+            )
+            .toList(),
+      };
+
+      final input = await compute(_preprocessToFloat32Isolate, req);
+
+      // For NHWC format (1, 640, 640, 3)
+      final inputForInterpreter = _buildNHWCInput(input);
+
+      // Prepare output tensor for shape (1, 5, 8400)
+      final outputForInterpreter = List.generate(
+        1,
+        (_) => List.generate(5, (_) => List.filled(8400, 0.0)),
+      );
+
+      // Run inference
+      _interpreter!.run(inputForInterpreter, outputForInterpreter);
+
+      _addToLog('Inference complete');
+      return outputForInterpreter;
+    } catch (error) {
+      _addToLog('Error during inference: $error');
+      return null;
+    }
+  }
+
   /// Detect drones on a camera image. If TFLite is not enabled, returns
   /// an empty list so the app can continue to function without ML.
-  static Future<List<Detection>?> detectDrones(CameraImage image) async {
+  static Future<List<Detection>> detectDrones(CameraImage image) async {
     if (!_tfliteEnabled || _interpreter == null) return [];
 
-    // Full ML pipeline not implemented yet — placeholder to add inference later.
-    return [];
+    final output = await runInference(image);
+    if (output == null || output.isEmpty) return [];
+
+    final List<Detection> rawDetections = [];
+    const confidenceThreshold = 0.25; // Adjustable confidence threshold
+
+    try {
+      // Process output tensor (1, 5, 8400)
+      final boxes = output[0]; // shape is [5, 8400]
+
+      // For each grid cell
+      for (var i = 0; i < 8400; i++) {
+        final confidence = boxes[4][i];
+        if (confidence > confidenceThreshold) {
+          // Extract box coordinates (centerX, centerY, width, height)
+          final centerX = boxes[0][i];
+          final centerY = boxes[1][i];
+          final width = boxes[2][i];
+          final height = boxes[3][i];
+
+          // Convert to corners (relative coordinates 0-1)
+          final x1 = (centerX - width / 2).clamp(0.0, 1.0);
+          final y1 = (centerY - height / 2).clamp(0.0, 1.0);
+          final x2 = (centerX + width / 2).clamp(0.0, 1.0);
+          final y2 = (centerY + height / 2).clamp(0.0, 1.0);
+
+          rawDetections.add(
+            Detection(
+              boundingBox: BoundingBox(
+                left: x1,
+                top: y1,
+                right: x2,
+                bottom: y2,
+              ),
+              confidence: confidence,
+            ),
+          );
+        }
+      }
+
+      // Sort by confidence and apply NMS if needed
+      rawDetections.sort((a, b) => b.confidence.compareTo(a.confidence));
+
+      if (rawDetections.isNotEmpty) {
+        _addToLog(
+          'Found ${rawDetections.length} drones with confidences: ${rawDetections.map((d) => d.confidence.toStringAsFixed(2)).join(", ")}',
+        );
+      } else {
+        _addToLog('No drones detected above threshold $confidenceThreshold');
+      }
+    } catch (e) {
+      _addToLog('Error processing detections: $e');
+      return [];
+    }
+
+    return rawDetections;
   }
 
   /// Convert CameraImage (YUV420) to a normalized Float32List matching

@@ -110,29 +110,12 @@ class _MyHomePageState extends State<MyHomePage> {
 
   void _startImageStream() {
     _controller.startImageStream((CameraImage image) {
-      // keep latest image for debug inference
+      // Just keep latest image for debug inference
       _latestImage = image;
-      if (!isDetecting) {
-        isDetecting = true;
-        _detectDrones(image).then((_) {
-          isDetecting = false;
-        });
-      }
     });
   }
 
-  Future<void> _detectDrones(CameraImage image) async {
-    try {
-      final results = await DroneDetector.detectDrones(image);
-      if (results != null) {
-        setState(() {
-          _detections = results;
-        });
-      }
-    } catch (e) {
-      print('Error during detection: $e');
-    }
-  }
+
 
   @override
   void dispose() {
@@ -193,15 +176,18 @@ class _MyHomePageState extends State<MyHomePage> {
                       );
                       return;
                     }
-                    // Query model input/output shape before running inference
 
+                    // Run single inference and update detections
+                    final detections = await DroneDetector.detectDrones(_latestImage!);
+                    setState(() {
+                      _detections = detections;
+                    });
+
+                    // Show debug dialog with shapes and log
+                    if (!mounted) return;
                     final inputShape = DroneDetector.inputShape;
                     final outputShape = DroneDetector.outputShape;
-
-                    final msg = await DroneDetector.testInference(
-                      _latestImage!,
-                    );
-                    if (!mounted) return;
+                    final debugLog = DroneDetector.getDebugLog();
 
                     // Show debug output in scrollable dialog
                     showDialog(
@@ -219,48 +205,33 @@ class _MyHomePageState extends State<MyHomePage> {
                               if (outputShape != null)
                                 Text('Output shape: $outputShape'),
                               const SizedBox(height: 8),
+                              Text('Detections: ${_detections?.length ?? 0}'),
+                              if (_detections?.isNotEmpty ?? false) ...[
+                                const SizedBox(height: 8),
+                                Text('Confidence scores: ${_detections!.map((d) => d.confidence.toStringAsFixed(2)).join(", ")}'),
+                              ],
+                              const SizedBox(height: 8),
+                              const Text('Full debug log:'),
                               Flexible(
                                 child: SingleChildScrollView(
-                                  child: SelectableText(msg),
+                                  child: SelectableText(debugLog),
                                 ),
                               ),
                               const SizedBox(height: 16),
                               Row(
-                                mainAxisAlignment:
-                                    MainAxisAlignment.spaceBetween,
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                 children: [
                                   TextButton(
                                     onPressed: () {
-                                      final data = ClipboardData(text: msg);
+                                      final data = ClipboardData(text: debugLog);
                                       Clipboard.setData(data);
-                                      ScaffoldMessenger.of(
-                                        context,
-                                      ).showSnackBar(
+                                      ScaffoldMessenger.of(context).showSnackBar(
                                         const SnackBar(
-                                          content: Text(
-                                            'Debug output copied to clipboard',
-                                          ),
+                                          content: Text('Debug log copied to clipboard'),
                                         ),
                                       );
                                     },
-                                    child: const Text('Copy'),
-                                  ),
-                                  TextButton(
-                                    onPressed: () {
-                                      final log = DroneDetector.getDebugLog();
-                                      final data = ClipboardData(text: log);
-                                      Clipboard.setData(data);
-                                      ScaffoldMessenger.of(
-                                        context,
-                                      ).showSnackBar(
-                                        const SnackBar(
-                                          content: Text(
-                                            'Full debug log copied to clipboard',
-                                          ),
-                                        ),
-                                      );
-                                    },
-                                    child: const Text('Copy Full Log'),
+                                    child: const Text('Copy Log'),
                                   ),
                                 ],
                               ),
