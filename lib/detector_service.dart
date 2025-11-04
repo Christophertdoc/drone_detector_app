@@ -402,7 +402,7 @@ class DroneDetector {
 
     final List<Detection> rawDetections = [];
     const confidenceThreshold = 0.25; // Adjustable confidence threshold
-    const iouThreshold = 0.45; // IoU threshold for NMS
+    const iouThreshold = 0.3; // IoU threshold for NMS (lower = stricter filtering)
 
     try {
       // Process output tensor (1, 5, 8400)
