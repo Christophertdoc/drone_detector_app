@@ -115,8 +115,6 @@ class _MyHomePageState extends State<MyHomePage> {
     });
   }
 
-
-
   @override
   void dispose() {
     _controller.dispose();
@@ -178,7 +176,9 @@ class _MyHomePageState extends State<MyHomePage> {
                     }
 
                     // Run single inference and update detections
-                    final detections = await DroneDetector.detectDrones(_latestImage!);
+                    final detections = await DroneDetector.detectDrones(
+                      _latestImage!,
+                    );
                     setState(() {
                       _detections = detections;
                     });
@@ -208,7 +208,9 @@ class _MyHomePageState extends State<MyHomePage> {
                               Text('Detections: ${_detections?.length ?? 0}'),
                               if (_detections?.isNotEmpty ?? false) ...[
                                 const SizedBox(height: 8),
-                                Text('Confidence scores: ${_detections!.map((d) => d.confidence.toStringAsFixed(2)).join(", ")}'),
+                                Text(
+                                  'Confidence scores: ${_detections!.map((d) => d.confidence.toStringAsFixed(2)).join(", ")}',
+                                ),
                               ],
                               const SizedBox(height: 8),
                               const Text('Full debug log:'),
@@ -219,15 +221,22 @@ class _MyHomePageState extends State<MyHomePage> {
                               ),
                               const SizedBox(height: 16),
                               Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
                                 children: [
                                   TextButton(
                                     onPressed: () {
-                                      final data = ClipboardData(text: debugLog);
+                                      final data = ClipboardData(
+                                        text: debugLog,
+                                      );
                                       Clipboard.setData(data);
-                                      ScaffoldMessenger.of(context).showSnackBar(
+                                      ScaffoldMessenger.of(
+                                        context,
+                                      ).showSnackBar(
                                         const SnackBar(
-                                          content: Text('Debug log copied to clipboard'),
+                                          content: Text(
+                                            'Debug log copied to clipboard',
+                                          ),
                                         ),
                                       );
                                     },
