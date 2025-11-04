@@ -82,6 +82,7 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   cameras = await availableCameras();
   await DroneDetector.initialize();
+  await DroneDetector.enableTflite();
   runApp(const MyApp());
 }
 
@@ -184,126 +185,33 @@ class _MyHomePageState extends State<MyHomePage> {
         },
       ),
       floatingActionButton: kDebugMode
-          ? Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                FloatingActionButton(
-                  heroTag: 'enable_tflite',
-                  onPressed: () async {
-                    final msg = await DroneDetector.enableTflite();
-                    if (!mounted) return;
-                    ScaffoldMessenger.of(
-                      context,
-                    ).showSnackBar(SnackBar(content: Text(msg)));
-                  },
-                  child: const Icon(Icons.bug_report),
-                  tooltip: 'Enable tflite (debug)',
-                ),
-                const SizedBox(height: 8),
-                FloatingActionButton(
-                  heroTag: 'run_inference',
-                  onPressed: () async {
-                    if (_latestImage == null) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('No camera frame available yet'),
-                        ),
-                      );
-                      return;
-                    }
+          ? FloatingActionButton(
+              heroTag: 'run_inference',
+              onPressed: () async {
+                if (_latestImage == null) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('No camera frame available yet'),
+                    ),
+                  );
+                  return;
+                }
 
-                    // Clear any existing detections before running new inference
-                    setState(() {
-                      _detections = [];
-                    });
+                // Clear any existing detections before running new inference
+                setState(() {
+                  _detections = [];
+                });
 
-                    // Run single inference and update detections
-                    final detections = await DroneDetector.detectDrones(
-                      _latestImage!,
-                    );
-                    setState(() {
-                      _detections = detections;
-                    });
-
-                    // Show debug dialog with shapes and log
-                    if (!mounted) return;
-                    final inputShape = DroneDetector.inputShape;
-                    final outputShape = DroneDetector.outputShape;
-                    final debugLog = DroneDetector.getDebugLog();
-
-                    return;
-
-                    // Show debug output in scrollable dialog
-                    showDialog(
-                      context: context,
-                      builder: (context) => AlertDialog(
-                        title: const Text('Inference Debug Output'),
-                        content: SizedBox(
-                          width: double.maxFinite,
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              if (inputShape != null)
-                                Text('Input shape: $inputShape'),
-                              if (outputShape != null)
-                                Text('Output shape: $outputShape'),
-                              const SizedBox(height: 8),
-                              Text('Detections: ${_detections?.length ?? 0}'),
-                              if (_detections?.isNotEmpty ?? false) ...[
-                                const SizedBox(height: 8),
-                                Text(
-                                  'Confidence scores: ${_detections!.map((d) => d.confidence.toStringAsFixed(2)).join(", ")}',
-                                ),
-                              ],
-                              const SizedBox(height: 8),
-                              const Text('Full debug log:'),
-                              Flexible(
-                                child: SingleChildScrollView(
-                                  child: SelectableText(debugLog),
-                                ),
-                              ),
-                              const SizedBox(height: 16),
-                              Row(
-                                mainAxisAlignment:
-                                    MainAxisAlignment.spaceBetween,
-                                children: [
-                                  TextButton(
-                                    onPressed: () {
-                                      final data = ClipboardData(
-                                        text: debugLog,
-                                      );
-                                      Clipboard.setData(data);
-                                      ScaffoldMessenger.of(
-                                        context,
-                                      ).showSnackBar(
-                                        const SnackBar(
-                                          content: Text(
-                                            'Debug log copied to clipboard',
-                                          ),
-                                        ),
-                                      );
-                                    },
-                                    child: const Text('Copy Log'),
-                                  ),
-                                ],
-                              ),
-                            ],
-                          ),
-                        ),
-                        actions: [
-                          TextButton(
-                            onPressed: () => Navigator.pop(context),
-                            child: const Text('Close'),
-                          ),
-                        ],
-                      ),
-                    );
-                  },
-                  child: const Icon(Icons.play_arrow),
-                  tooltip: 'Run single inference (debug)',
-                ),
-              ],
+                // Run single inference and update detections
+                final detections = await DroneDetector.detectDrones(
+                  _latestImage!,
+                );
+                setState(() {
+                  _detections = detections;
+                });
+              },
+              child: const Icon(Icons.play_arrow),
+              tooltip: 'Run single inference (debug)',
             )
           : null,
     );
