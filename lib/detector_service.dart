@@ -291,9 +291,11 @@ class DroneDetector {
     if (output == null || output.isEmpty) return [];
 
     final List<Detection> rawDetections = [];
-    const confidenceThreshold = 0.60; // Adjustable confidence threshold
+    const confidenceThreshold = 0.50; // Adjustable confidence threshold
     const iouThreshold =
         0.3; // IoU threshold for NMS (lower = stricter filtering)
+    const minBoxArea =
+        0.005; // Minimum box area (0.5% of image) to filter tiny detections
 
     try {
       // Process output tensor (1, 5, 8400)
@@ -314,6 +316,15 @@ class DroneDetector {
           final y1 = (centerY - height / 2).clamp(0.0, 1.0);
           final x2 = (centerX + width / 2).clamp(0.0, 1.0);
           final y2 = (centerY + height / 2).clamp(0.0, 1.0);
+
+          // Calculate box area and filter out tiny detections
+          final boxWidth = x2 - x1;
+          final boxHeight = y2 - y1;
+          final boxArea = boxWidth * boxHeight;
+
+          if (boxArea < minBoxArea) {
+            continue; // Skip tiny detections (likely noise)
+          }
 
           rawDetections.add(
             Detection(
