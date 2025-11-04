@@ -1,4 +1,5 @@
 import 'dart:typed_data';
+import 'dart:math' as math;
 
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
@@ -335,6 +336,62 @@ class DroneDetector {
     }
   }
 
+  /// Calculate Intersection over Union (IoU) between two bounding boxes
+  static double _calculateIoU(Detection a, Detection b) {
+    // Calculate intersection
+    final intersectLeft = math.max(a.boundingBox.left, b.boundingBox.left);
+    final intersectTop = math.max(a.boundingBox.top, b.boundingBox.top);
+    final intersectRight = math.min(a.boundingBox.right, b.boundingBox.right);
+    final intersectBottom = math.min(
+      a.boundingBox.bottom,
+      b.boundingBox.bottom,
+    );
+
+    if (intersectRight <= intersectLeft || intersectBottom <= intersectTop) {
+      return 0.0;
+    }
+
+    final intersectionArea =
+        (intersectRight - intersectLeft) * (intersectBottom - intersectTop);
+
+    // Calculate union
+    final box1Area =
+        (a.boundingBox.right - a.boundingBox.left) *
+        (a.boundingBox.bottom - a.boundingBox.top);
+    final box2Area =
+        (b.boundingBox.right - b.boundingBox.left) *
+        (b.boundingBox.bottom - b.boundingBox.top);
+    final unionArea = box1Area + box2Area - intersectionArea;
+
+    return intersectionArea / unionArea;
+  }
+
+  /// Apply Non-Maximum Suppression to filter overlapping detections
+  static List<Detection> _applyNMS(
+    List<Detection> detections,
+    double iouThreshold,
+  ) {
+    if (detections.isEmpty) return [];
+
+    final List<Detection> selected = [];
+    // Detections should already be sorted by confidence (highest first)
+
+    while (detections.isNotEmpty) {
+      final current = detections.removeAt(
+        0,
+      ); // Take highest confidence detection
+      selected.add(current);
+
+      // Filter out detections that overlap too much with the current one
+      detections.removeWhere((detection) {
+        final iou = _calculateIoU(current, detection);
+        return iou > iouThreshold;
+      });
+    }
+
+    return selected;
+  }
+
   /// Detect drones on a camera image. If TFLite is not enabled, returns
   /// an empty list so the app can continue to function without ML.
   static Future<List<Detection>> detectDrones(CameraImage image) async {
@@ -345,6 +402,7 @@ class DroneDetector {
 
     final List<Detection> rawDetections = [];
     const confidenceThreshold = 0.25; // Adjustable confidence threshold
+    const iouThreshold = 0.45; // IoU threshold for NMS
 
     try {
       // Process output tensor (1, 5, 8400)
@@ -380,22 +438,29 @@ class DroneDetector {
         }
       }
 
-      // Sort by confidence and apply NMS if needed
+      // Sort by confidence (highest first) before NMS
       rawDetections.sort((a, b) => b.confidence.compareTo(a.confidence));
+
+      // Apply Non-Maximum Suppression
+      final filteredDetections = _applyNMS(
+        List.from(rawDetections),
+        iouThreshold,
+      );
 
       if (rawDetections.isNotEmpty) {
         _addToLog(
-          'Found ${rawDetections.length} drones with confidences: ${rawDetections.map((d) => d.confidence.toStringAsFixed(2)).join(", ")}',
+          'Found ${rawDetections.length} raw detections, ${filteredDetections.length} after NMS. '
+          'Confidences: ${filteredDetections.map((d) => d.confidence.toStringAsFixed(2)).join(", ")}',
         );
       } else {
         _addToLog('No drones detected above threshold $confidenceThreshold');
       }
+
+      return filteredDetections;
     } catch (e) {
       _addToLog('Error processing detections: $e');
       return [];
     }
-
-    return rawDetections;
   }
 
   /// Convert CameraImage (YUV420) to a normalized Float32List matching
