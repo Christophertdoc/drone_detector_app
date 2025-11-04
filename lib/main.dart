@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter/services.dart';
 import 'package:camera/camera.dart';
 import 'dart:math' as math;
 import 'detector_service.dart';
@@ -81,7 +80,6 @@ List<CameraDescription> cameras = [];
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   cameras = await availableCameras();
-  await DroneDetector.initialize();
   await DroneDetector.enableTflite();
   runApp(const MyApp());
 }
@@ -210,8 +208,8 @@ class _MyHomePageState extends State<MyHomePage> {
                   _detections = detections;
                 });
               },
-              child: const Icon(Icons.play_arrow),
               tooltip: 'Run single inference (debug)',
+              child: const Icon(Icons.play_arrow),
             )
           : null,
     );
