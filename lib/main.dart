@@ -110,7 +110,7 @@ class _MyHomePageState extends State<MyHomePage> {
 
   void _startImageStream() {
     _controller.startImageStream((CameraImage image) {
-      // Just keep latest image for debug inference
+      // Keep latest image for debug inference
       _latestImage = image;
     });
   }
@@ -174,6 +174,11 @@ class _MyHomePageState extends State<MyHomePage> {
                       );
                       return;
                     }
+
+                    // Clear any existing detections before running new inference
+                    setState(() {
+                      _detections = [];
+                    });
 
                     // Run single inference and update detections
                     final detections = await DroneDetector.detectDrones(

@@ -401,7 +401,7 @@ class DroneDetector {
     if (output == null || output.isEmpty) return [];
 
     final List<Detection> rawDetections = [];
-    const confidenceThreshold = 0.25; // Adjustable confidence threshold
+    const confidenceThreshold = 0.60; // Adjustable confidence threshold
     const iouThreshold =
         0.3; // IoU threshold for NMS (lower = stricter filtering)
 
