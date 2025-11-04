@@ -231,6 +231,8 @@ class _MyHomePageState extends State<MyHomePage> {
                     final outputShape = DroneDetector.outputShape;
                     final debugLog = DroneDetector.getDebugLog();
 
+                    return;
+
                     // Show debug output in scrollable dialog
                     showDialog(
                       context: context,
