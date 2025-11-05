@@ -107,8 +107,6 @@ Future<Float32List> _preprocessToFloat32Isolate(
 /// with camera-only functionality while we incrementally enable ML.
 class DroneDetector {
   static Interpreter? _interpreter;
-  static bool _tfliteEnabled = false;
-  static final StringBuffer _debugLog = StringBuffer();
 
   /// Public: get model input shape, or null if not loaded
   static List<int>? get inputShape {
@@ -153,21 +151,18 @@ class DroneDetector {
     String modelAsset = 'models/drone-detection-yolov11_float16.tflite',
   }) async {
     if (_interpreter != null) {
-      _addToLog('Interpreter already loaded');
       return 'Interpreter already loaded';
     }
     try {
-      _addToLog('Loading interpreter from $modelAsset...');
       _interpreter = await Interpreter.fromAsset(
         modelAsset,
         options: InterpreterOptions()..threads = 2,
       );
-      _tfliteEnabled = true;
-      _addToLog('Interpreter loaded successfully');
+
       return 'Interpreter loaded successfully';
     } catch (e, st) {
       final error = 'Failed to load interpreter: $e\n$st';
-      _addToLog(error);
+      debugPrint(error);
       return error;
     }
   }
@@ -177,12 +172,12 @@ class DroneDetector {
     CameraImage image,
   ) async {
     try {
-      if (!_tfliteEnabled || _interpreter == null) {
-        _addToLog('TFLite not enabled');
+      if (_interpreter == null) {
+        debugPrint('TFLite not enabled');
         return null;
       }
 
-      _addToLog('Starting inference...');
+      debugPrint('Starting inference...');
 
       // Preprocess image in isolate
       final req = {
@@ -218,10 +213,10 @@ class DroneDetector {
       // Run inference
       _interpreter!.run(inputForInterpreter, outputForInterpreter);
 
-      _addToLog('Inference complete');
+      debugPrint('Inference complete');
       return outputForInterpreter;
     } catch (error) {
-      _addToLog('Error during inference: $error');
+      debugPrint('Error during inference: $error');
       return null;
     }
   }
@@ -285,7 +280,7 @@ class DroneDetector {
   /// Detect drones on a camera image. If TFLite is not enabled, returns
   /// an empty list so the app can continue to function without ML.
   static Future<List<Detection>> detectDrones(CameraImage image) async {
-    if (!_tfliteEnabled || _interpreter == null) return [];
+    if (_interpreter == null) return [];
 
     final output = await runInference(image);
     if (output == null || output.isEmpty) return [];
@@ -344,30 +339,18 @@ class DroneDetector {
       rawDetections.sort((a, b) => b.confidence.compareTo(a.confidence));
 
       // Apply Non-Maximum Suppression
+      // NMS (Non-Maximum Suppression) removes duplicate/overlapping bounding
+      // boxes of the same object by keeping only the highest-confidence detection
+      // and discarding others that overlap with it by more than a threshold (iou)
       final filteredDetections = _applyNMS(
         List.from(rawDetections),
         iouThreshold,
       );
 
-      if (rawDetections.isNotEmpty) {
-        _addToLog(
-          'Found ${rawDetections.length} raw detections, ${filteredDetections.length} after NMS. '
-          'Confidences: ${filteredDetections.map((d) => d.confidence.toStringAsFixed(2)).join(", ")}',
-        );
-      } else {
-        _addToLog('No drones detected above threshold $confidenceThreshold');
-      }
-
       return filteredDetections;
     } catch (e) {
-      _addToLog('Error processing detections: $e');
+      debugPrint('[ Error processing detections ]: $e');
       return [];
     }
-  }
-
-  /// Add a message to the debug log with timestamp
-  static void _addToLog(String message) {
-    final timestamp = DateTime.now();
-    _debugLog.writeln('[$timestamp] $message');
   }
 }
