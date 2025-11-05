@@ -119,6 +119,7 @@ class _MyHomePageState extends State<MyHomePage> {
   CameraImage? _latestImage;
   Timer? _inferenceTimer;
   bool _isContinuousInference = false;
+  bool _isProcessing = false;
 
   @override
   void initState() {
@@ -150,30 +151,27 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   void _startContinuousInference() {
-    debugPrint('Starting continuous inference...');
     _isContinuousInference = true;
     _runInferenceLoop();
   }
 
   Future<void> _runInferenceLoop() async {
-    debugPrint('Inference loop started');
     while (_isContinuousInference && mounted) {
-      if (_latestImage != null) {
-        debugPrint('Running detection...');
+      // Skip if already processing to prevent backlog
+      if (_latestImage != null && !_isProcessing) {
+        _isProcessing = true;
         final detections = await DroneDetector.detectDrones(_latestImage!);
-        debugPrint('Got ${detections.length} detections');
+        _isProcessing = false;
+
         if (mounted) {
           setState(() {
             _detections = detections;
           });
         }
-      } else {
-        debugPrint('No image available yet');
       }
-      // Small delay to prevent tight loop, but inference runs as fast as possible
-      await Future.delayed(const Duration(milliseconds: 100));
+      // Delay for ~1 FPS (1000ms = 1 second between inference runs)
+      await Future.delayed(const Duration(milliseconds: 1000));
     }
-    debugPrint('Inference loop stopped');
   }
 
   void _stopContinuousInference() {

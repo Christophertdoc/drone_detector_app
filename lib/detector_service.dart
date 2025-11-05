@@ -212,7 +212,7 @@ class DroneDetector {
   ) async {
     try {
       if (_isolateInterpreter == null) {
-        debugPrint('TFLite not enabled');
+        // debugPrint('TFLite not enabled'); // Disabled for performance
         return null;
       }
 
@@ -222,7 +222,7 @@ class DroneDetector {
       }
 
       _isInferenceRunning = true;
-      debugPrint('Starting inference...');
+      // debugPrint('Starting inference...'); // Disabled for performance
 
       // Preprocess image in isolate
       final req = {
@@ -258,11 +258,11 @@ class DroneDetector {
       // Run inference asynchronously in isolate (non-blocking)
       await _isolateInterpreter!.run(inputForInterpreter, outputForInterpreter);
 
-      debugPrint('Inference complete');
+      // debugPrint('Inference complete'); // Disabled for performance
       _isInferenceRunning = false;
       return outputForInterpreter;
     } catch (error) {
-      debugPrint('Inference error: $error');
+      // debugPrint('Inference error: $error'); // Disabled for performance
       _isInferenceRunning = false;
       debugPrint('Error during inference: $error');
       return null;
@@ -375,11 +375,11 @@ class DroneDetector {
 
       // Early return if no detections
       if (rawDetections.isEmpty) {
-        debugPrint('No detections found above threshold');
+        // debugPrint('No detections found above threshold'); // Disabled for performance
         return [];
       }
 
-      debugPrint('Found ${rawDetections.length} raw detections');
+      // debugPrint('Found ${rawDetections.length} raw detections'); // Disabled for performance
 
       // Sort by confidence (highest first) before NMS
       rawDetections.sort((a, b) => b.confidence.compareTo(a.confidence));
@@ -393,7 +393,7 @@ class DroneDetector {
         iouThreshold,
       );
 
-      debugPrint('After NMS: ${filteredDetections.length} detections');
+      // debugPrint('After NMS: ${filteredDetections.length} detections'); // Disabled for performance
       return filteredDetections;
     } catch (e) {
       debugPrint('[ Error processing detections ]: $e');
