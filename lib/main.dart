@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:camera/camera.dart';
 import 'dart:math' as math;
+import 'dart:async';
 import 'detector_service.dart';
 import 'models.dart';
 
@@ -115,6 +117,8 @@ class _MyHomePageState extends State<MyHomePage> {
   bool isDetecting = false;
   List<Detection>? _detections;
   CameraImage? _latestImage;
+  Timer? _inferenceTimer;
+  bool _isContinuousInference = false;
 
   @override
   void initState() {
@@ -126,7 +130,7 @@ class _MyHomePageState extends State<MyHomePage> {
     final camera = cameras[0]; // Use the first available camera
     _controller = CameraController(
       camera,
-      ResolutionPreset.medium,
+      ResolutionPreset.low, // Lower resolution = faster preprocessing
       enableAudio: false,
     );
 
@@ -134,19 +138,58 @@ class _MyHomePageState extends State<MyHomePage> {
       if (!mounted) return;
       setState(() {});
       _startImageStream();
+      _startContinuousInference(); // Start continuous inference at 1 FPS
     });
   }
 
   void _startImageStream() {
     _controller.startImageStream((CameraImage image) {
-      // Keep latest image for debug inference
+      // Keep latest image for continuous inference
       _latestImage = image;
+    });
+  }
+
+  void _startContinuousInference() {
+    debugPrint('Starting continuous inference...');
+    _isContinuousInference = true;
+    _runInferenceLoop();
+  }
+
+  Future<void> _runInferenceLoop() async {
+    debugPrint('Inference loop started');
+    while (_isContinuousInference && mounted) {
+      if (_latestImage != null) {
+        debugPrint('Running detection...');
+        final detections = await DroneDetector.detectDrones(_latestImage!);
+        debugPrint('Got ${detections.length} detections');
+        if (mounted) {
+          setState(() {
+            _detections = detections;
+          });
+        }
+      } else {
+        debugPrint('No image available yet');
+      }
+      // Small delay to prevent tight loop, but inference runs as fast as possible
+      await Future.delayed(const Duration(milliseconds: 100));
+    }
+    debugPrint('Inference loop stopped');
+  }
+
+  void _stopContinuousInference() {
+    _isContinuousInference = false;
+    _inferenceTimer?.cancel();
+    _inferenceTimer = null;
+    setState(() {
+      _detections = [];
     });
   }
 
   @override
   void dispose() {
+    _inferenceTimer?.cancel();
     _controller.dispose();
+    DroneDetector.dispose();
     super.dispose();
   }
 
@@ -183,33 +226,22 @@ class _MyHomePageState extends State<MyHomePage> {
         },
       ),
       floatingActionButton: kDebugMode
-          ? FloatingActionButton(
-              heroTag: 'run_inference',
-              onPressed: () async {
-                if (_latestImage == null) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('No camera frame available yet'),
-                    ),
-                  );
-                  return;
+          ? FloatingActionButton.extended(
+              heroTag: 'toggle_inference',
+              onPressed: () {
+                if (_isContinuousInference) {
+                  _stopContinuousInference();
+                } else {
+                  _startContinuousInference();
                 }
-
-                // Clear any existing detections before running new inference
-                setState(() {
-                  _detections = [];
-                });
-
-                // Run single inference and update detections
-                final detections = await DroneDetector.detectDrones(
-                  _latestImage!,
-                );
-                setState(() {
-                  _detections = detections;
-                });
               },
-              tooltip: 'Run single inference (debug)',
-              child: const Icon(Icons.play_arrow),
+              icon: Icon(
+                _isContinuousInference ? Icons.stop : Icons.play_arrow,
+              ),
+              label: Text(_isContinuousInference ? 'Stop' : 'Start'),
+              tooltip: _isContinuousInference
+                  ? 'Stop continuous inference'
+                  : 'Start continuous inference',
             )
           : null,
     );

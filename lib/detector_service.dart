@@ -1,4 +1,6 @@
 import 'dart:math' as math;
+import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
@@ -107,6 +109,8 @@ Future<Float32List> _preprocessToFloat32Isolate(
 /// with camera-only functionality while we incrementally enable ML.
 class DroneDetector {
   static Interpreter? _interpreter;
+  static IsolateInterpreter? _isolateInterpreter;
+  static bool _isInferenceRunning = false;
 
   /// Public: get model input shape, or null if not loaded
   static List<int>? get inputShape {
@@ -154,9 +158,44 @@ class DroneDetector {
       return 'Interpreter already loaded';
     }
     try {
-      _interpreter = await Interpreter.fromAsset(
-        modelAsset,
-        options: InterpreterOptions()..threads = 2,
+      // Configure interpreter with optimizations
+      final options = InterpreterOptions()
+        ..threads = 4; // Increase threads for better CPU utilization
+
+      // Temporarily disable GPU delegate - it may be causing issues
+      debugPrint('Using CPU-only inference');
+
+      /*
+      // Try to add appropriate GPU delegate based on platform
+      if (Platform.isIOS) {
+        try {
+          // iOS uses Metal delegate (simpler configuration)
+          final gpuDelegate = GpuDelegate(
+            options: GpuDelegateOptions(
+              allowPrecisionLoss: true, // Allow FP16 for speed
+            ),
+          );
+          options.addDelegate(gpuDelegate);
+          debugPrint('Metal GPU delegate added successfully');
+        } catch (e) {
+          debugPrint('Metal delegate not available, using CPU: $e');
+        }
+      } else if (Platform.isAndroid) {
+        try {
+          options.addDelegate(GpuDelegateV2());
+          debugPrint('GPU delegate added successfully');
+        } catch (e) {
+          debugPrint('GPU delegate not available: $e');
+        }
+        options.useNnApiForAndroid = true;
+      }
+      */
+
+      _interpreter = await Interpreter.fromAsset(modelAsset, options: options);
+
+      // Create IsolateInterpreter for async inference
+      _isolateInterpreter = await IsolateInterpreter.create(
+        address: _interpreter!.address,
       );
 
       return 'Interpreter loaded successfully';
@@ -172,11 +211,17 @@ class DroneDetector {
     CameraImage image,
   ) async {
     try {
-      if (_interpreter == null) {
+      if (_isolateInterpreter == null) {
         debugPrint('TFLite not enabled');
         return null;
       }
 
+      // Prevent concurrent inference calls
+      if (_isInferenceRunning) {
+        return null; // Silently skip instead of logging
+      }
+
+      _isInferenceRunning = true;
       debugPrint('Starting inference...');
 
       // Preprocess image in isolate
@@ -210,12 +255,15 @@ class DroneDetector {
         (_) => List.generate(5, (_) => List.filled(8400, 0.0)),
       );
 
-      // Run inference
-      _interpreter!.run(inputForInterpreter, outputForInterpreter);
+      // Run inference asynchronously in isolate (non-blocking)
+      await _isolateInterpreter!.run(inputForInterpreter, outputForInterpreter);
 
       debugPrint('Inference complete');
+      _isInferenceRunning = false;
       return outputForInterpreter;
     } catch (error) {
+      debugPrint('Inference error: $error');
+      _isInferenceRunning = false;
       debugPrint('Error during inference: $error');
       return null;
     }
@@ -286,54 +334,52 @@ class DroneDetector {
     if (output == null || output.isEmpty) return [];
 
     final List<Detection> rawDetections = [];
-    const confidenceThreshold = 0.50; // Adjustable confidence threshold
+    const confidenceThreshold = 0.25; // Lower threshold for testing
     const iouThreshold =
         0.3; // IoU threshold for NMS (lower = stricter filtering)
-    const minBoxArea =
-        0.005; // Minimum box area (0.5% of image) to filter tiny detections
+    const minBoxArea = 0.005; // Lower minimum for testing
 
     try {
       // Process output tensor (1, 5, 8400)
       final boxes = output[0]; // shape is [5, 8400]
 
-      // For each grid cell
+      // For each grid cell - early exit optimization
       for (var i = 0; i < 8400; i++) {
         final confidence = boxes[4][i];
-        if (confidence > confidenceThreshold) {
-          // Extract box coordinates (centerX, centerY, width, height)
-          final centerX = boxes[0][i];
-          final centerY = boxes[1][i];
-          final width = boxes[2][i];
-          final height = boxes[3][i];
+        if (confidence <= confidenceThreshold)
+          continue; // Skip low confidence quickly
 
-          // Convert to corners (relative coordinates 0-1)
-          final x1 = (centerX - width / 2).clamp(0.0, 1.0);
-          final y1 = (centerY - height / 2).clamp(0.0, 1.0);
-          final x2 = (centerX + width / 2).clamp(0.0, 1.0);
-          final y2 = (centerY + height / 2).clamp(0.0, 1.0);
+        // Extract box coordinates (centerX, centerY, width, height)
+        final centerX = boxes[0][i];
+        final centerY = boxes[1][i];
+        final width = boxes[2][i];
+        final height = boxes[3][i];
 
-          // Calculate box area and filter out tiny detections
-          final boxWidth = x2 - x1;
-          final boxHeight = y2 - y1;
-          final boxArea = boxWidth * boxHeight;
+        // Quick area check before creating objects
+        final boxArea = width * height;
+        if (boxArea < minBoxArea) continue;
 
-          if (boxArea < minBoxArea) {
-            continue; // Skip tiny detections (likely noise)
-          }
+        // Convert to corners (relative coordinates 0-1)
+        final x1 = (centerX - width / 2).clamp(0.0, 1.0);
+        final y1 = (centerY - height / 2).clamp(0.0, 1.0);
+        final x2 = (centerX + width / 2).clamp(0.0, 1.0);
+        final y2 = (centerY + height / 2).clamp(0.0, 1.0);
 
-          rawDetections.add(
-            Detection(
-              boundingBox: BoundingBox(
-                left: x1,
-                top: y1,
-                right: x2,
-                bottom: y2,
-              ),
-              confidence: confidence,
-            ),
-          );
-        }
+        rawDetections.add(
+          Detection(
+            boundingBox: BoundingBox(left: x1, top: y1, right: x2, bottom: y2),
+            confidence: confidence,
+          ),
+        );
       }
+
+      // Early return if no detections
+      if (rawDetections.isEmpty) {
+        debugPrint('No detections found above threshold');
+        return [];
+      }
+
+      debugPrint('Found ${rawDetections.length} raw detections');
 
       // Sort by confidence (highest first) before NMS
       rawDetections.sort((a, b) => b.confidence.compareTo(a.confidence));
@@ -343,14 +389,24 @@ class DroneDetector {
       // boxes of the same object by keeping only the highest-confidence detection
       // and discarding others that overlap with it by more than a threshold (iou)
       final filteredDetections = _applyNMS(
-        List.from(rawDetections),
+        rawDetections, // No need for List.from, NMS modifies in place
         iouThreshold,
       );
 
+      debugPrint('After NMS: ${filteredDetections.length} detections');
       return filteredDetections;
     } catch (e) {
       debugPrint('[ Error processing detections ]: $e');
       return [];
     }
+  }
+
+  /// Dispose interpreters when done
+  static Future<void> dispose() async {
+    await _isolateInterpreter?.close();
+    _isolateInterpreter = null;
+    _interpreter?.close();
+    _interpreter = null;
+    _isInferenceRunning = false;
   }
 }
